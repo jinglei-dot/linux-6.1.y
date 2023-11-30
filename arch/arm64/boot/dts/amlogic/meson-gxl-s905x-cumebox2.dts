@@ -1,0 +1,307 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2016 Endless Computers, Inc.
+ * Author: Carlo Caione <carlo@endlessm.com>
+ */
+
+/dts-v1/;
+
+#include "meson-gxl-s905x-p212.dtsi"
+#include <dt-bindings/leds/common.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/sound/meson-aiu.h>
+
+/ {
+	compatible = "amlogic,p212", "amlogic,s905x", "amlogic,meson-gxl";
+	model = "Amlogic Meson GXL (S905X) CumeBox2 Board";
+
+	dio2133: analog-amplifier {
+		compatible = "simple-audio-amplifier";
+		sound-name-prefix = "AU2";
+		VCC-supply = <&hdmi_5v>;
+		enable-gpios = <&gpio GPIOH_5 GPIO_ACTIVE_HIGH>;
+	};
+
+	cvbs-connector {
+		compatible = "composite-video-connector";
+
+		port {
+			cvbs_connector_in: endpoint {
+				remote-endpoint = <&cvbs_vdac_out>;
+			};
+		};
+	};
+
+	hdmi-connector {
+		compatible = "hdmi-connector";
+		type = "a";
+
+		port {
+			hdmi_connector_in: endpoint {
+				remote-endpoint = <&hdmi_tx_tmds_out>;
+			};
+		};
+	};
+
+	sound {
+		compatible = "amlogic,gx-sound-card";
+		model = "S905X-P212";
+		audio-aux-devs = <&dio2133>;
+		audio-widgets = "Line", "Lineout";
+		audio-routing = "AU2 INL", "ACODEC LOLN",
+				"AU2 INR", "ACODEC LORN",
+				"Lineout", "AU2 OUTL",
+				"Lineout", "AU2 OUTR";
+		assigned-clocks = <&clkc CLKID_MPLL0>,
+				  <&clkc CLKID_MPLL1>,
+				  <&clkc CLKID_MPLL2>;
+		assigned-clock-parents = <0>, <0>, <0>;
+		assigned-clock-rates = <294912000>,
+				       <270950400>,
+				       <393216000>;
+		status = "okay";
+
+		dai-link-0 {
+			sound-dai = <&aiu AIU_CPU CPU_I2S_FIFO>;
+		};
+
+		dai-link-1 {
+			sound-dai = <&aiu AIU_CPU CPU_I2S_ENCODER>;
+			dai-format = "i2s";
+			mclk-fs = <256>;
+
+			codec-0 {
+				sound-dai = <&aiu AIU_HDMI CTRL_I2S>;
+			};
+
+			codec-1 {
+				sound-dai = <&aiu AIU_ACODEC CTRL_I2S>;
+			};
+		};
+
+		dai-link-2 {
+			sound-dai = <&aiu AIU_HDMI CTRL_OUT>;
+
+			codec-0 {
+				sound-dai = <&hdmi_tx>;
+			};
+		};
+
+		dai-link-3 {
+			sound-dai = <&aiu AIU_ACODEC CTRL_OUT>;
+
+			codec-0 {
+				sound-dai = <&acodec>;
+			};
+		};
+	};
+
+	smbios {
+		compatible = "u-boot,sysinfo-smbios";
+
+		smbios {
+			system {
+				manufacturer = "CumeBox2";
+				product = "CM2-B";
+			};
+
+			baseboard {
+				manufacturer = "CumeBox2";
+				product = "CM2-B";
+			};
+
+			chassis {
+				manufacturer = "CumeBox2";
+				product = "CM2-B";
+			};
+		};
+	};
+
+        leds {
+		compatible = "gpio-leds";
+
+		led_blue {
+			label = "led_blue";
+			color = <LED_COLOR_ID_BLUE>;
+			gpios = <&gpio GPIODV_24 GPIO_ACTIVE_HIGH>; // 73  gpio 474
+                        default-state = "off";
+		};
+
+		led_red {
+			label = "led_red";
+			color = <LED_COLOR_ID_RED>;
+                        function = LED_FUNCTION_STATUS;
+			gpios = <&gpio GPIODV_26 GPIO_ACTIVE_HIGH>; // 75 gpio 476
+                        default-state = "off";
+			panic-indicator;
+		};
+
+		led_green {
+			label = "led_green";
+			color = <LED_COLOR_ID_GREEN>;
+                        function = LED_FUNCTION_HEARTBEAT;
+			gpios = <&gpio GPIODV_27 GPIO_ACTIVE_HIGH>; // 76  gpio 477
+                        linux,default-trigger = "heartbeat";
+		};
+
+		led_link {
+			label = "led_link";
+                        color = <LED_COLOR_ID_GREEN>;
+			gpios = <&gpio GPIOZ_14 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+			linux,default-trigger = "mdio_mux-0.e40908ff:08:link";
+		};
+
+		led_act {
+			label = "led_act";
+                        color = <LED_COLOR_ID_YELLOW>;
+			gpios = <&gpio GPIOZ_15 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+	};
+
+	thermal-zones {
+		cpu-thermal {
+			polling-delay-passive = <800>; /* milliseconds */
+			polling-delay = <2000>; /* milliseconds */		
+			thermal-sensors = <&scpi_sensors 0>;
+
+			trips {
+				cpu_active: cpu-active {
+					temperature = <50000>; /* millicelsius */
+					hysteresis = <2000>; /* millicelsius */
+					type = "active";
+				};
+
+				cpu_passive: cpu-passive {
+					temperature = <75000>; /* millicelsius */
+					hysteresis = <2000>; /* millicelsius */
+					type = "passive";
+				};
+
+				cpu_hot: cpu-hot {
+					temperature = <95000>; /* millicelsius */
+					hysteresis = <2000>; /* millicelsius */
+					type = "hot";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&cpu_active>;
+					cooling-device = <&gpio_fan THERMAL_NO_LIMIT 1>;
+				};
+
+				map1 {
+					trip = <&cpu_passive>;
+					cooling-device = <&gpio_fan THERMAL_NO_LIMIT 1>;
+				};
+
+				map2 {
+					trip = <&cpu_hot>;
+					cooling-device = <&gpio_fan THERMAL_NO_LIMIT 1>,
+				              <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+				              <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+				              <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+				              <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+	};
+
+	gpio_fan: gpio-fan {
+		#cooling-cells = <2>;
+		compatible = "gpio-fan";
+                status = "okay";
+		gpio-fan,speed-map = <0 0 3500 1>;
+		gpios = <&gpio_ao GPIOAO_3 GPIO_ACTIVE_HIGH>; //3 gpio 504
+	};
+
+	gpio-keys-polled {
+		compatible = "gpio-keys-polled";
+		poll-interval = <100>;
+
+		power-button {
+			label = "power";
+			linux,code = <KEY_POWER>;
+			gpios = <&gpio_ao GPIOAO_2 GPIO_ACTIVE_LOW>;//2 gpio 503
+		};
+
+		reset-button {
+			label = "reset";
+			linux,code = <KEY_FN_F1>;
+			gpios = <&gpio_ao GPIOAO_9 GPIO_ACTIVE_LOW>;//9 gpio 510
+		};
+
+		ap-button {
+			label = "ap";
+			linux,code = <KEY_FN_F2>;
+			gpios = <&gpio_ao GPIOAO_6 GPIO_ACTIVE_LOW>;  //6 gpio 507
+		};
+	};
+
+	openvfd {
+		compatible = "open,vfd";
+		dev_name = "openvfd";
+		status = "okay";
+	};
+};
+
+&acodec {
+	AVDD-supply = <&vddio_ao18>;
+	status = "okay";
+};
+
+&aiu {
+	status = "okay";
+};
+
+&cec_AO {
+	status = "okay";
+	pinctrl-0 = <&ao_cec_pins>;
+	pinctrl-names = "default";
+	hdmi-phandle = <&hdmi_tx>;
+};
+
+&cvbs_vdac_port {
+	cvbs_vdac_out: endpoint {
+		remote-endpoint = <&cvbs_connector_in>;
+	};
+};
+
+&hdmi_tx {
+	status = "okay";
+	pinctrl-0 = <&hdmi_hpd_pins>, <&hdmi_i2c_pins>;
+	pinctrl-names = "default";
+	hdmi-supply = <&hdmi_5v>;
+};
+
+&hdmi_tx_tmds_port {
+	hdmi_tx_tmds_out: endpoint {
+		remote-endpoint = <&hdmi_connector_in>;
+	};
+};
+
+/* This UART is brought out to the DB9 connector */
+&uart_AO {
+	status = "okay";
+};
+
+
+// enable I2C
+&i2c_AO {
+	status = "okay";
+	pinctrl-0 = <&i2c_ao_pins>; //GPIOAO4,GPIOAO5
+	pinctrl-names = "default";
+	clock-frequency = < 400000 >;
+
+	ssd1306: oled@3c {
+                status = "okay";
+		compatible = "solomon,ssd1306fb-i2c";
+		reg = < 0x3c >;
+		solomon,width = < 128 >;
+		solomon,height = < 64 >;
+		solomon,page-offset = < 0 >;
+		solomon,com-invdir;
+	};
+};

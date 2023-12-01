@@ -287,6 +287,9 @@
 	status = "okay";
 };
 
+&mali {
+	status = "okay";
+};
 
 // enable I2C
 &i2c_AO {

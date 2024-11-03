@@ -62,7 +62,8 @@ xt_flowoffload_net_hook(void *priv, struct sk_buff *skb,
 		proto = veth->h_vlan_encapsulated_proto;
 		break;
 	case htons(ETH_P_PPP_SES):
-		proto = nf_flow_pppoe_proto(skb);
+		if (!nf_flow_pppoe_proto(skb, &proto))
+			return NF_ACCEPT;
 		break;
 	default:
 		proto = skb->protocol;
@@ -443,9 +444,14 @@ xt_flowoffload_route(struct sk_buff *skb, const struct nf_conn *ct,
 		break;
 	}
 
-	nf_route(xt_net(par), &other_dst, &fl, false, xt_family(par));
-	if (!other_dst)
+	if (!dst_hold_safe(this_dst))
 		return -ENOENT;
+
+	nf_route(xt_net(par), &other_dst, &fl, false, xt_family(par));
+	if (!other_dst) {
+		dst_release(this_dst);
+		return -ENOENT;
+	}
 
 	nf_default_forward_path(route, this_dst, dir, devs);
 	nf_default_forward_path(route, other_dst, !dir, devs);
@@ -503,6 +509,8 @@ flowoffload_tg(struct sk_buff *skb, const struct xt_action_param *par)
 	if (!nf_ct_is_confirmed(ct))
 		return XT_CONTINUE;
 
+	dir = CTINFO2DIR(ctinfo);
+
 	devs[dir] = xt_out(par);
 	devs[!dir] = xt_in(par);
 
@@ -512,8 +520,6 @@ flowoffload_tg(struct sk_buff *skb, const struct xt_action_param *par)
 	if (test_and_set_bit(IPS_OFFLOAD_BIT, &ct->status))
 		return XT_CONTINUE;
 
-	dir = CTINFO2DIR(ctinfo);
-
 	if (xt_flowoffload_route(skb, ct, par, &route, dir, devs) < 0)
 		goto err_flow_route;
 
@@ -521,8 +527,7 @@ flowoffload_tg(struct sk_buff *skb, const struct xt_action_param *par)
 	if (!flow)
 		goto err_flow_alloc;
 
-	if (flow_offload_route_init(flow, &route) < 0)
-		goto err_flow_add;
+	flow_offload_route_init(flow, &route);
 
 	if (tcph) {
 		ct->proto.tcp.seen[0].flags |= IP_CT_TCP_FLAG_BE_LIBERAL;
@@ -535,19 +540,19 @@ flowoffload_tg(struct sk_buff *skb, const struct xt_action_param *par)
 	if (!net)
 		write_pnet(&table->ft.net, xt_net(par));
 
+	__set_bit(NF_FLOW_HW_BIDIRECTIONAL, &flow->flags);
 	if (flow_offload_add(&table->ft, flow) < 0)
 		goto err_flow_add;
 
 	xt_flowoffload_check_device(table, devs[0]);
 	xt_flowoffload_check_device(table, devs[1]);
 
-	dst_release(route.tuple[!dir].dst);
-
 	return XT_CONTINUE;
 
 err_flow_add:
 	flow_offload_free(flow);
 err_flow_alloc:
+	dst_release(route.tuple[dir].dst);
 	dst_release(route.tuple[!dir].dst);
 err_flow_route:
 	clear_bit(IPS_OFFLOAD_BIT, &ct->status);
@@ -615,7 +620,7 @@ static struct notifier_block flow_offload_netdev_notifier = {
 };
 
 static int nf_flow_rule_route_inet(struct net *net,
-				   const struct flow_offload *flow,
+				   struct flow_offload *flow,
 				   enum flow_offload_tuple_dir dir,
 				   struct nf_flow_rule *flow_rule)
 {

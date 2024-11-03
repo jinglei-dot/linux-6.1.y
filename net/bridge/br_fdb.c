@@ -23,6 +23,7 @@
 #include <net/switchdev.h>
 #include <trace/events/bridge.h>
 #include "br_private.h"
+#include "br_private_offload.h"
 
 static const struct rhashtable_params br_fdb_rht_params = {
 	.head_offset = offsetof(struct net_bridge_fdb_entry, rhnode),
@@ -184,6 +185,8 @@ static void fdb_notify(struct net_bridge *br,
 	struct net *net = dev_net(br->dev);
 	struct sk_buff *skb;
 	int err = -ENOBUFS;
+
+	br_offload_fdb_update(fdb);
 
 	if (swdev_notify)
 		br_switchdev_fdb_notify(br, fdb, type);
@@ -393,6 +396,8 @@ static struct net_bridge_fdb_entry *fdb_create(struct net_bridge *br,
 	fdb->key.vlan_id = vid;
 	fdb->flags = flags;
 	fdb->updated = fdb->used = jiffies;
+	INIT_HLIST_HEAD(&fdb->offload_in);
+	INIT_HLIST_HEAD(&fdb->offload_out);
 	err = rhashtable_lookup_insert_fast(&br->fdb_hash_tbl, &fdb->rhnode,
 					    br_fdb_rht_params);
 	if (err) {
@@ -1388,12 +1393,10 @@ int br_fdb_external_learn_add(struct net_bridge *br, struct net_bridge_port *p,
 			modified = true;
 		}
 
-		if (test_bit(BR_FDB_ADDED_BY_EXT_LEARN, &fdb->flags)) {
+		if (test_and_set_bit(BR_FDB_ADDED_BY_EXT_LEARN, &fdb->flags)) {
 			/* Refresh entry */
 			fdb->used = jiffies;
-		} else if (!test_bit(BR_FDB_ADDED_BY_USER, &fdb->flags)) {
-			/* Take over SW learned entry */
-			set_bit(BR_FDB_ADDED_BY_EXT_LEARN, &fdb->flags);
+		} else {
 			modified = true;
 		}
 

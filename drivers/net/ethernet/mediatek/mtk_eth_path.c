@@ -398,3 +398,4 @@ int mtk_gmac_rgmii_path_setup(struct mtk_eth *eth, int mac_id)
 	/* Setup proper MUXes along the path */
 	return mtk_eth_mux_setup(eth, path);
 }
+

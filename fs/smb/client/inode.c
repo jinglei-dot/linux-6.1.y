@@ -264,7 +264,7 @@ cifs_unix_basic_to_fattr(struct cifs_fattr *fattr, FILE_UNIX_BASIC_INFO *info,
 		fattr->cf_dtype = DT_REG;
 		break;
 	case UNIX_SYMLINK:
-		fattr->cf_mode |= S_IFLNK;
+		fattr->cf_mode |= S_IFLNK | cifs_sb->ctx->file_mode;
 		fattr->cf_dtype = DT_LNK;
 		break;
 	case UNIX_DIR:
@@ -772,6 +772,8 @@ static void cifs_open_info_to_fattr(struct cifs_fattr *fattr, struct cifs_open_i
 	}
 
 	if (S_ISLNK(fattr->cf_mode)) {
+		if (likely(data->symlink_target))
+			fattr->cf_eof = strnlen(data->symlink_target, PATH_MAX);
 		fattr->cf_symlink_target = data->symlink_target;
 		data->symlink_target = NULL;
 	}
@@ -1271,6 +1273,8 @@ static int
 cifs_find_inode(struct inode *inode, void *opaque)
 {
 	struct cifs_fattr *fattr = opaque;
+
+	/* [!] The compared values must be the same in struct cifs_fscache_inode_key. */
 
 	/* don't match inode with different uniqueid */
 	if (CIFS_I(inode)->uniqueid != fattr->cf_uniqueid)

@@ -15,6 +15,7 @@
 #include <linux/u64_stats_sync.h>
 #include <linux/refcount.h>
 #include <linux/phylink.h>
+#include <linux/reset.h>
 #include <linux/rhashtable.h>
 #include <linux/dim.h>
 #include <linux/bitfield.h>
@@ -575,67 +576,10 @@
 #define ETHSYS_DMA_AG_MAP_QDMA	BIT(1)
 #define ETHSYS_DMA_AG_MAP_PPE	BIT(2)
 
-/* USXGMII subsystem config registers */
-/* Register to control speed */
-#define RG_PHY_TOP_SPEED_CTRL1	0x80C
-#define USXGMII_RATE_UPDATE_MODE	BIT(31)
-#define USXGMII_MAC_CK_GATED	BIT(29)
-#define USXGMII_IF_FORCE_EN	BIT(28)
-#define USXGMII_RATE_ADAPT_MODE	GENMASK(10, 8)
-#define USXGMII_RATE_ADAPT_MODE_X1	0
-#define USXGMII_RATE_ADAPT_MODE_X2	1
-#define USXGMII_RATE_ADAPT_MODE_X4	2
-#define USXGMII_RATE_ADAPT_MODE_X10	3
-#define USXGMII_RATE_ADAPT_MODE_X100	4
-#define USXGMII_RATE_ADAPT_MODE_X5	5
-#define USXGMII_RATE_ADAPT_MODE_X50	6
-#define USXGMII_XFI_RX_MODE	GENMASK(6, 4)
-#define USXGMII_XFI_RX_MODE_10G	0
-#define USXGMII_XFI_RX_MODE_5G	1
-#define USXGMII_XFI_TX_MODE	GENMASK(2, 0)
-#define USXGMII_XFI_TX_MODE_10G	0
-#define USXGMII_XFI_TX_MODE_5G	1
-
-/* Register to control PCS AN */
-#define RG_PCS_AN_CTRL0		0x810
-#define USXGMII_AN_RESTART	BIT(31)
-#define USXGMII_AN_SYNC_CNT	GENMASK(30, 11)
-#define USXGMII_AN_ENABLE	BIT(0)
-
-#define RG_PCS_AN_CTRL2		0x818
-#define USXGMII_LINK_TIMER_IDLE_DETECT	GENMASK(29, 20)
-#define USXGMII_LINK_TIMER_COMP_ACK_DETECT	GENMASK(19, 10)
-#define USXGMII_LINK_TIMER_AN_RESTART	GENMASK(9, 0)
-
-/* Register to read PCS AN status */
-#define RG_PCS_AN_STS0		0x81c
-#define USXGMII_PCS_AN_WORD	GENMASK(15, 0)
-#define USXGMII_LPA_LATCH	BIT(31)
-
-/* Register to control USXGMII XFI PLL digital */
-#define XFI_PLL_DIG_GLB8	0x08
-#define RG_XFI_PLL_EN		BIT(31)
-
-/* Register to control USXGMII XFI PLL analog */
-#define XFI_PLL_ANA_GLB8	0x108
-#define RG_XFI_PLL_ANA_SWWA	0x02283248
-
 /* Infrasys subsystem config registers */
 #define INFRA_MISC2            0x70c
 #define CO_QPHY_SEL            BIT(0)
 #define GEPHY_MAC_SEL          BIT(1)
-
-/* Toprgu subsystem config registers */
-#define TOPRGU_SWSYSRST		0x18
-#define SWSYSRST_UNLOCK_KEY	GENMASK(31, 24)
-#define SWSYSRST_XFI_PLL_GRST	BIT(16)
-#define SWSYSRST_XFI_PEXPT1_GRST	BIT(15)
-#define SWSYSRST_XFI_PEXPT0_GRST	BIT(14)
-#define SWSYSRST_XFI1_GRST	BIT(13)
-#define SWSYSRST_XFI0_GRST	BIT(12)
-#define SWSYSRST_SGMII1_GRST	BIT(2)
-#define SWSYSRST_SGMII0_GRST	BIT(1)
-#define TOPRGU_SWSYSRST_EN		0xFC
 
 /* Top misc registers */
 #define TOP_MISC_NETSYS_PCS_MUX	0x84
@@ -806,12 +750,8 @@ enum mtk_clks_map {
 	MTK_CLK_ETHWARP_WOCPU2,
 	MTK_CLK_ETHWARP_WOCPU1,
 	MTK_CLK_ETHWARP_WOCPU0,
-	MTK_CLK_TOP_USXGMII_SBUS_0_SEL,
-	MTK_CLK_TOP_USXGMII_SBUS_1_SEL,
 	MTK_CLK_TOP_SGM_0_SEL,
 	MTK_CLK_TOP_SGM_1_SEL,
-	MTK_CLK_TOP_XFI_PHY_0_XTAL_SEL,
-	MTK_CLK_TOP_XFI_PHY_1_XTAL_SEL,
 	MTK_CLK_TOP_ETH_GMII_SEL,
 	MTK_CLK_TOP_ETH_REFCK_50M_SEL,
 	MTK_CLK_TOP_ETH_SYS_200M_SEL,
@@ -882,19 +822,9 @@ enum mtk_clks_map {
 				 BIT_ULL(MTK_CLK_GP3) | BIT_ULL(MTK_CLK_XGP1) | \
 				 BIT_ULL(MTK_CLK_XGP2) | BIT_ULL(MTK_CLK_XGP3) | \
 				 BIT_ULL(MTK_CLK_CRYPTO) | \
-				 BIT_ULL(MTK_CLK_SGMII_TX_250M) | \
-				 BIT_ULL(MTK_CLK_SGMII_RX_250M) | \
-				 BIT_ULL(MTK_CLK_SGMII2_TX_250M) | \
-				 BIT_ULL(MTK_CLK_SGMII2_RX_250M) | \
 				 BIT_ULL(MTK_CLK_ETHWARP_WOCPU2) | \
 				 BIT_ULL(MTK_CLK_ETHWARP_WOCPU1) | \
 				 BIT_ULL(MTK_CLK_ETHWARP_WOCPU0) | \
-				 BIT_ULL(MTK_CLK_TOP_USXGMII_SBUS_0_SEL) | \
-				 BIT_ULL(MTK_CLK_TOP_USXGMII_SBUS_1_SEL) | \
-				 BIT_ULL(MTK_CLK_TOP_SGM_0_SEL) | \
-				 BIT_ULL(MTK_CLK_TOP_SGM_1_SEL) | \
-				 BIT_ULL(MTK_CLK_TOP_XFI_PHY_0_XTAL_SEL) | \
-				 BIT_ULL(MTK_CLK_TOP_XFI_PHY_1_XTAL_SEL) | \
 				 BIT_ULL(MTK_CLK_TOP_ETH_GMII_SEL) | \
 				 BIT_ULL(MTK_CLK_TOP_ETH_REFCK_50M_SEL) | \
 				 BIT_ULL(MTK_CLK_TOP_ETH_SYS_200M_SEL) | \
@@ -1258,7 +1188,7 @@ struct mtk_reg_map {
 	u32	gdm1_cnt;
 	u32	gdma_to_ppe;
 	u32	ppe_base;
-	u32	wdma_base[2];
+	u32	wdma_base[3];
 	u32	pse_iq_sta;
 	u32	pse_oq_sta;
 };
@@ -1314,24 +1244,6 @@ struct mtk_soc_data {
 /* currently no SoC has more than 3 macs */
 #define MTK_MAX_DEVS	3
 
-/* struct mtk_usxgmii_pcs - This structure holds each usxgmii regmap and
- *			associated data
- * @regmap:		The register map pointing at the range used to setup
- *			USXGMII modes
- * @interface:		Currently selected interface mode
- * @id:			The element is used to record the index of PCS
- * @pcs:		Phylink PCS structure
- */
-struct mtk_usxgmii_pcs {
-	struct mtk_eth		*eth;
-	struct regmap		*regmap;
-	struct phylink_pcs	*wrapped_sgmii_pcs;
-	phy_interface_t		interface;
-	u8			id;
-	unsigned int		mode;
-	struct phylink_pcs	pcs;
-};
-
 /* struct mtk_eth -	This is the main datasructure for holding the state
  *			of the driver
  * @dev:		The device pointer
@@ -1352,12 +1264,6 @@ struct mtk_usxgmii_pcs {
  * @infra:              The register map pointing at the range used to setup
  *                      SGMII and GePHY path
  * @sgmii_pcs:		Pointers to mtk-pcs-lynxi phylink_pcs instances
- * @sgmii_wrapped_pcs:	Pointers to NETSYSv3 wrapper PCS instances
- * @usxgmii_pll:	The register map pointing at the range used to control
- *			the USXGMII SerDes PLL
- * @regmap_pextp:	The register map pointing at the range used to setup
- *			PHYA
- * @usxgmii_pcs:	Pointer to array of pointers to struct for USXGMII PCS
  * @pctl:		The register map pointing at the range used to setup
  *			GMAC port drive/slew values
  * @dma_refcnt:		track how many netdevs are using the DMA engine
@@ -1401,10 +1307,6 @@ struct mtk_eth {
 	struct regmap			*ethsys;
 	struct regmap			*infra;
 	struct phylink_pcs		*sgmii_pcs[MTK_MAX_DEVS];
-	struct regmap			*toprgu;
-	struct regmap			*usxgmii_pll;
-	struct regmap			*regmap_pextp[MTK_MAX_DEVS];
-	struct mtk_usxgmii_pcs		*usxgmii_pcs[MTK_MAX_DEVS];
 	struct regmap			*pctl;
 	bool				hwlro;
 	refcount_t			dma_refcnt;
@@ -1469,6 +1371,9 @@ struct mtk_mac {
 	struct device_node		*of_node;
 	struct phylink			*phylink;
 	struct phylink_config		phylink_config;
+	struct phylink_pcs		*sgmii_pcs;
+	struct phylink_pcs		*usxgmii_pcs;
+	struct phy			*pextp;
 	struct mtk_eth			*hw;
 	struct mtk_hw_stats		*hw_stats;
 	__be32				hwlro_ip[MTK_MAX_LRO_IP_CNT];
@@ -1626,63 +1531,5 @@ int mtk_flow_offload_cmd(struct mtk_eth *eth, struct flow_cls_offload *cls,
 void mtk_flow_offload_cleanup(struct mtk_eth *eth, struct list_head *list);
 void mtk_eth_set_dma_device(struct mtk_eth *eth, struct device *dma_dev);
 
-static inline int mtk_mac2xgmii_id(struct mtk_eth *eth, int mac_id)
-{
-	int xgmii_id = mac_id;
-
-	if (mtk_is_netsys_v3_or_greater(eth)) {
-		switch (mac_id) {
-		case MTK_GMAC1_ID:
-		case MTK_GMAC2_ID:
-			xgmii_id = 1;
-			break;
-		case MTK_GMAC3_ID:
-			xgmii_id = 0;
-			break;
-		default:
-			xgmii_id = -1;
-		}
-	}
-
-	return MTK_HAS_CAPS(eth->soc->caps, MTK_SHARED_SGMII) ? 0 : xgmii_id;
-}
-
-static inline int mtk_xgmii2mac_id(struct mtk_eth *eth, int xgmii_id)
-{
-	int mac_id = xgmii_id;
-
-	if (mtk_is_netsys_v3_or_greater(eth)) {
-		switch (xgmii_id) {
-		case 0:
-			mac_id = 2;
-			break;
-		case 1:
-			mac_id = 1;
-			break;
-		default:
-			mac_id = -1;
-		}
-	}
-
-	return mac_id;
-}
-
-#ifdef CONFIG_NET_MEDIATEK_SOC_USXGMII
-struct phylink_pcs *mtk_sgmii_wrapper_select_pcs(struct mtk_eth *eth, int id);
-struct phylink_pcs *mtk_usxgmii_select_pcs(struct mtk_eth *eth, int id);
-int mtk_usxgmii_init(struct mtk_eth *eth);
-#else
-static inline struct phylink_pcs *mtk_sgmii_wrapper_select_pcs(struct mtk_eth *eth, int id)
-{
-	return NULL;
-}
-
-static inline struct phylink_pcs *mtk_usxgmii_select_pcs(struct mtk_eth *eth, int id)
-{
-	return NULL;
-}
-
-static inline int mtk_usxgmii_init(struct mtk_eth *eth) { return 0; }
-#endif /* NET_MEDIATEK_SOC_USXGMII */
 
 #endif /* MTK_ETH_H */

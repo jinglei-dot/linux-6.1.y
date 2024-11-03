@@ -21,6 +21,8 @@
 #include <linux/pinctrl/devinfo.h>
 #include <linux/phylink.h>
 #include <linux/pcs/pcs-mtk-lynxi.h>
+#include <linux/pcs/pcs-mtk-usxgmii.h>
+#include <linux/phy/phy.h>
 #include <linux/jhash.h>
 #include <linux/bitfield.h>
 #include <net/dsa.h>
@@ -195,6 +197,7 @@ static const struct mtk_reg_map mt7988_reg_map = {
 	.wdma_base = {
 		[0]		= 0x4800,
 		[1]		= 0x4c00,
+		[2]		= 0x5000,
 	},
 	.pse_iq_sta		= 0x0180,
 	.pse_oq_sta		= 0x01a0,
@@ -257,12 +260,8 @@ static const char * const mtk_clks_source_name[] = {
 	"ethwarp_wocpu2",
 	"ethwarp_wocpu1",
 	"ethwarp_wocpu0",
-	"top_usxgmii0_sel",
-	"top_usxgmii1_sel",
 	"top_sgm0_sel",
 	"top_sgm1_sel",
-	"top_xfi_phy0_xtal_sel",
-	"top_xfi_phy1_xtal_sel",
 	"top_eth_gmii_sel",
 	"top_eth_refck_50m_sel",
 	"top_eth_sys_200m_sel",
@@ -506,20 +505,27 @@ static struct phylink_pcs *mtk_mac_select_pcs(struct phylink_config *config,
 	struct mtk_eth *eth = mac->hw;
 	unsigned int sid;
 
-	if ((interface == PHY_INTERFACE_MODE_SGMII ||
-	     phy_interface_mode_is_8023z(interface)) &&
-	    MTK_HAS_CAPS(eth->soc->caps, MTK_SGMII)) {
-		sid = mtk_mac2xgmii_id(eth, mac->id);
-		if (MTK_HAS_CAPS(eth->soc->caps, MTK_USXGMII))
-			return mtk_sgmii_wrapper_select_pcs(eth, mac->id);
-		else
-			return eth->sgmii_pcs[sid];
-	} else if ((interface == PHY_INTERFACE_MODE_USXGMII ||
-		    interface == PHY_INTERFACE_MODE_10GBASER ||
-		    interface == PHY_INTERFACE_MODE_5GBASER) &&
-		   MTK_HAS_CAPS(eth->soc->caps, MTK_USXGMII) &&
-		   mac->id != MTK_GMAC1_ID) {
-		return mtk_usxgmii_select_pcs(eth, mac->id);
+	if (mtk_is_netsys_v3_or_greater(eth)) {
+		switch (interface) {
+		case PHY_INTERFACE_MODE_1000BASEX:
+		case PHY_INTERFACE_MODE_2500BASEX:
+		case PHY_INTERFACE_MODE_SGMII:
+			return mac->sgmii_pcs;
+		case PHY_INTERFACE_MODE_5GBASER:
+		case PHY_INTERFACE_MODE_10GBASER:
+		case PHY_INTERFACE_MODE_USXGMII:
+			return mac->usxgmii_pcs;
+		default:
+			return NULL;
+		}
+	}
+
+	if (interface == PHY_INTERFACE_MODE_SGMII ||
+	    phy_interface_mode_is_8023z(interface)) {
+		sid = (MTK_HAS_CAPS(eth->soc->caps, MTK_SHARED_SGMII)) ?
+		       0 : mac->id;
+
+		return eth->sgmii_pcs[sid];
 	}
 
 	return NULL;
@@ -707,6 +713,18 @@ init_err:
 		mac->id, phy_modes(state->interface), err);
 }
 
+static int mtk_mac_prepare(struct phylink_config *config, unsigned int mode,
+			   phy_interface_t interface)
+{
+	struct mtk_mac *mac = container_of(config, struct mtk_mac,
+					   phylink_config);
+
+	if (mac->pextp && mac->interface != interface)
+		phy_reset(mac->pextp);
+
+	return 0;
+}
+
 static int mtk_mac_finish(struct phylink_config *config, unsigned int mode,
 			  phy_interface_t interface)
 {
@@ -714,6 +732,10 @@ static int mtk_mac_finish(struct phylink_config *config, unsigned int mode,
 					   phylink_config);
 	struct mtk_eth *eth = mac->hw;
 	u32 mcr_cur, mcr_new;
+
+	/* Setup PMA/PMD */
+	if (mac->pextp)
+		phy_set_mode_ext(mac->pextp, PHY_MODE_ETHERNET, interface);
 
 	/* Enable SGMII */
 	if (interface == PHY_INTERFACE_MODE_SGMII ||
@@ -725,8 +747,7 @@ static int mtk_mac_finish(struct phylink_config *config, unsigned int mode,
 	mcr_cur = mtk_r32(mac->hw, MTK_MAC_MCR(mac->id));
 	mcr_new = mcr_cur;
 	mcr_new |= MAC_MCR_IPG_CFG | MAC_MCR_FORCE_MODE |
-		   MAC_MCR_BACKOFF_EN | MAC_MCR_BACKPR_EN | MAC_MCR_FORCE_LINK |
-		   MAC_MCR_RX_FIFO_CLR_DIS;
+		   MAC_MCR_BACKOFF_EN | MAC_MCR_BACKPR_EN | MAC_MCR_RX_FIFO_CLR_DIS;
 
 	/* Only update control register when needed! */
 	if (mcr_new != mcr_cur)
@@ -742,9 +763,10 @@ static void mtk_mac_link_down(struct phylink_config *config, unsigned int mode,
 					   phylink_config);
 
 	if (!mtk_interface_mode_is_xgmii(interface)) {
-		mtk_m32(mac->hw, MAC_MCR_TX_EN | MAC_MCR_RX_EN, 0, MTK_MAC_MCR(mac->id));
-		mtk_m32(mac->hw, MTK_XGMAC_FORCE_LINK(mac->id), 0, MTK_XGMAC_STS(mac->id));
-	} else if (mac->id != MTK_GMAC1_ID) {
+		mtk_m32(mac->hw, MAC_MCR_TX_EN | MAC_MCR_RX_EN | MAC_MCR_FORCE_LINK, 0, MTK_MAC_MCR(mac->id));
+		if (mtk_is_netsys_v3_or_greater(mac->hw))
+			mtk_m32(mac->hw, MTK_XGMAC_FORCE_LINK(mac->id), 0, MTK_XGMAC_STS(mac->id));
+	} else if (mtk_is_netsys_v3_or_greater(mac->hw) && mac->id != MTK_GMAC1_ID) {
 		mtk_m32(mac->hw, XMAC_MCR_TRX_DISABLE, XMAC_MCR_TRX_DISABLE, MTK_XMAC_MCR(mac->id));
 	}
 }
@@ -852,7 +874,7 @@ static void mtk_gdm_mac_link_up(struct mtk_mac *mac,
 	if (rx_pause)
 		mcr |= MAC_MCR_FORCE_RX_FC;
 
-	mcr |= MAC_MCR_TX_EN | MAC_MCR_RX_EN;
+	mcr |= MAC_MCR_TX_EN | MAC_MCR_RX_EN | MAC_MCR_FORCE_LINK;
 	mtk_w32(mac->hw, mcr, MTK_MAC_MCR(mac->id));
 }
 
@@ -897,18 +919,22 @@ static void mtk_mac_link_up(struct phylink_config *config,
 	struct mtk_mac *mac = container_of(config, struct mtk_mac,
 					   phylink_config);
 
-	if (mtk_interface_mode_is_xgmii(interface))
+	if (mtk_is_netsys_v3_or_greater(mac->hw) && mtk_interface_mode_is_xgmii(interface))
 		mtk_xgdm_mac_link_up(mac, phy, mode, interface, speed, duplex,
 				     tx_pause, rx_pause);
 	else
 		mtk_gdm_mac_link_up(mac, phy, mode, interface, speed, duplex,
 				    tx_pause, rx_pause);
+
+	/* Repeat pextp setup to tune link */
+	if (mac->pextp)
+		phy_set_mode_ext(mac->pextp, PHY_MODE_ETHERNET, interface);
 }
 
 static const struct phylink_mac_ops mtk_phylink_ops = {
-	.validate = phylink_generic_validate,
 	.mac_select_pcs = mtk_mac_select_pcs,
 	.mac_config = mtk_mac_config,
+	.mac_prepare = mtk_mac_prepare,
 	.mac_finish = mtk_mac_finish,
 	.mac_link_down = mtk_mac_link_down,
 	.mac_link_up = mtk_mac_link_up,
@@ -3304,8 +3330,8 @@ static irqreturn_t mtk_handle_irq_rx(int irq, void *_eth)
 
 	eth->rx_events++;
 	if (likely(napi_schedule_prep(&eth->rx_napi))) {
-		mtk_rx_irq_disable(eth, eth->soc->txrx.rx_irq_done_mask);
 		__napi_schedule(&eth->rx_napi);
+		mtk_rx_irq_disable(eth, eth->soc->txrx.rx_irq_done_mask);
 	}
 
 	return IRQ_HANDLED;
@@ -3317,8 +3343,8 @@ static irqreturn_t mtk_handle_irq_tx(int irq, void *_eth)
 
 	eth->tx_events++;
 	if (likely(napi_schedule_prep(&eth->tx_napi))) {
-		mtk_tx_irq_disable(eth, MTK_TX_DONE_INT);
 		__napi_schedule(&eth->tx_napi);
+		mtk_tx_irq_disable(eth, MTK_TX_DONE_INT);
 	}
 
 	return IRQ_HANDLED;
@@ -3487,6 +3513,9 @@ static int mtk_open(struct net_device *dev)
 	struct mtk_eth *eth = mac->hw;
 	int i, err;
 
+	if (mac->pextp)
+		phy_power_on(mac->pextp);
+
 	err = phylink_of_phy_connect(mac->phylink, mac->of_node, 0);
 	if (err) {
 		netdev_err(dev, "%s: could not attach PHY: %d\n", __func__,
@@ -3614,6 +3643,9 @@ static int mtk_stop(struct net_device *dev)
 
 	for (i = 0; i < ARRAY_SIZE(eth->ppe); i++)
 		mtk_ppe_stop(eth->ppe[i]);
+
+	if (mac->pextp)
+		phy_power_off(mac->pextp);
 
 	return 0;
 }
@@ -4612,6 +4644,7 @@ static const struct net_device_ops mtk_netdev_ops = {
 static int mtk_add_mac(struct mtk_eth *eth, struct device_node *np)
 {
 	const __be32 *_id = of_get_property(np, "reg", NULL);
+	struct device_node *pcs_np;
 	phy_interface_t phy_mode;
 	struct phylink *phylink;
 	struct mtk_mac *mac;
@@ -4647,16 +4680,41 @@ static int mtk_add_mac(struct mtk_eth *eth, struct device_node *np)
 	mac->id = id;
 	mac->hw = eth;
 	mac->of_node = np;
+	pcs_np = of_parse_phandle(mac->of_node, "pcs-handle", 0);
+	if (pcs_np) {
+		mac->sgmii_pcs = mtk_pcs_lynxi_get(eth->dev, pcs_np);
+		if (IS_ERR(mac->sgmii_pcs)) {
+			if (PTR_ERR(mac->sgmii_pcs) == -EPROBE_DEFER)
+				return -EPROBE_DEFER;
 
-	err = of_get_ethdev_address(mac->of_node, eth->netdev[id]);
-	if (err == -EPROBE_DEFER)
-		return err;
+			dev_err(eth->dev, "cannot select SGMII PCS, error %ld\n",
+				PTR_ERR(mac->sgmii_pcs));
+			return PTR_ERR(mac->sgmii_pcs);
+		}
+	}
 
-	if (err) {
-		/* If the mac address is invalid, use random mac address */
-		eth_hw_addr_random(eth->netdev[id]);
-		dev_err(eth->dev, "generated random MAC address %pM\n",
-			eth->netdev[id]->dev_addr);
+	pcs_np = of_parse_phandle(mac->of_node, "pcs-handle", 1);
+	if (pcs_np) {
+		mac->usxgmii_pcs = mtk_usxgmii_pcs_get(eth->dev, pcs_np);
+		if (IS_ERR(mac->usxgmii_pcs)) {
+			if (PTR_ERR(mac->usxgmii_pcs) == -EPROBE_DEFER)
+				return -EPROBE_DEFER;
+
+			dev_err(eth->dev, "cannot select USXGMII PCS, error %ld\n",
+				PTR_ERR(mac->usxgmii_pcs));
+			return PTR_ERR(mac->usxgmii_pcs);
+		}
+	}
+
+	if (mtk_is_netsys_v3_or_greater(eth) && (mac->sgmii_pcs || mac->usxgmii_pcs)) {
+		mac->pextp = devm_of_phy_get(eth->dev, mac->of_node, NULL);
+		if (IS_ERR(mac->pextp)) {
+			if (PTR_ERR(mac->pextp) != -EPROBE_DEFER)
+				dev_err(eth->dev, "cannot get PHY, error %ld\n",
+					PTR_ERR(mac->pextp));
+
+			return PTR_ERR(mac->pextp);
+		}
 	}
 
 	memset(mac->hwlro_ip, 0, sizeof(mac->hwlro_ip));
@@ -4789,6 +4847,26 @@ free_netdev:
 	return err;
 }
 
+static int mtk_mac_assign_address(struct mtk_eth *eth, int i, bool test_defer_only)
+{
+	int err = of_get_ethdev_address(eth->mac[i]->of_node, eth->netdev[i]);
+
+	if (err == -EPROBE_DEFER)
+		return err;
+
+	if (test_defer_only)
+		return 0;
+
+	if (err) {
+		/* If the mac address is invalid, use random mac address */
+		eth_hw_addr_random(eth->netdev[i]);
+		dev_err(eth->dev, "generated random MAC address %pM\n",
+			eth->netdev[i]);
+	}
+
+	return 0;
+}
+
 void mtk_eth_set_dma_device(struct mtk_eth *eth, struct device *dma_dev)
 {
 	struct net_device *dev, *tmp;
@@ -4885,7 +4963,10 @@ static int mtk_probe(struct platform_device *pdev)
 	}
 
 	if (MTK_HAS_CAPS(eth->soc->caps, MTK_36BIT_DMA)) {
-		err = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(36));
+		err = dma_set_mask(&pdev->dev, DMA_BIT_MASK(36));
+		if (!err)
+			err = dma_set_coherent_mask(&pdev->dev, DMA_BIT_MASK(32));
+
 		if (err) {
 			dev_err(&pdev->dev, "Wrong DMA config\n");
 			return -EINVAL;
@@ -4932,15 +5013,9 @@ static int mtk_probe(struct platform_device *pdev)
 			regmap_write(cci, 0, 3);
 	}
 
-	if (MTK_HAS_CAPS(eth->soc->caps, MTK_SGMII)) {
+	if (MTK_HAS_CAPS(eth->soc->caps, MTK_SGMII) &&
+	    !mtk_is_netsys_v3_or_greater(eth)) {
 		err = mtk_sgmii_init(eth);
-
-		if (err)
-			return err;
-	}
-
-	if (MTK_HAS_CAPS(eth->soc->caps, MTK_USXGMII)) {
-		err = mtk_usxgmii_init(eth);
 
 		if (err)
 			return err;
@@ -5050,6 +5125,24 @@ static int mtk_probe(struct platform_device *pdev)
 		}
 	}
 
+	for (i = 0; i < MTK_MAX_DEVS; i++) {
+		if (!eth->netdev[i])
+			continue;
+
+		err = mtk_mac_assign_address(eth, i, true);
+		if (err)
+			goto err_deinit_hw;
+	}
+
+	for (i = 0; i < MTK_MAX_DEVS; i++) {
+		if (!eth->netdev[i])
+			continue;
+
+		err = mtk_mac_assign_address(eth, i, false);
+		if (err)
+			goto err_deinit_hw;
+	}
+
 	if (MTK_HAS_CAPS(eth->soc->caps, MTK_SHARED_INT)) {
 		err = devm_request_irq(eth->dev, eth->irq[0],
 				       mtk_handle_irq, 0,
@@ -5152,6 +5245,11 @@ static int mtk_remove(struct platform_device *pdev)
 		mtk_stop(eth->netdev[i]);
 		mac = netdev_priv(eth->netdev[i]);
 		phylink_disconnect_phy(mac->phylink);
+		if (mac->sgmii_pcs)
+			mtk_pcs_lynxi_put(mac->sgmii_pcs);
+
+		if (mac->usxgmii_pcs)
+			mtk_usxgmii_pcs_put(mac->usxgmii_pcs);
 	}
 
 	mtk_wed_exit();

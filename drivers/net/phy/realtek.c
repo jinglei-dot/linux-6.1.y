@@ -27,6 +27,8 @@
 #define RTL821x_EXT_PAGE_SELECT			0x1e
 #define RTL821x_PAGE_SELECT			0x1f
 
+#define RTL8211F_LCR				0x10
+#define RTL8211F_EEELCR				0x11
 #define RTL8211F_PHYCR1				0x18
 #define RTL8211F_PHYCR2				0x19
 #define RTL8211F_INSR				0x1d
@@ -80,6 +82,7 @@
 
 #define RTL_GENERIC_PHYID			0x001cc800
 #define RTL_8211FVD_PHYID			0x001cc878
+#define RTL_8221B_VB_CG_PHYID			0x001cc849
 
 MODULE_DESCRIPTION("Realtek PHY driver");
 MODULE_AUTHOR("Johnson Leung");
@@ -349,6 +352,7 @@ static int rtl8211f_config_init(struct phy_device *phydev)
 	struct rtl821x_priv *priv = phydev->priv;
 	struct device *dev = &phydev->mdio.dev;
 	u16 val_txdly, val_rxdly;
+	u32 led_data;
 	int ret;
 
 	ret = phy_modify_paged_changed(phydev, 0xa43, RTL8211F_PHYCR1,
@@ -415,6 +419,15 @@ static int rtl8211f_config_init(struct phy_device *phydev)
 			val_rxdly ? "enabled" : "disabled");
 	}
 
+	ret = of_property_read_u32(dev->of_node,
+				   "realtek,led-data", &led_data);
+	if (!ret) {
+		phy_write(phydev, RTL821x_PAGE_SELECT, 0xd04);
+		phy_write(phydev, RTL8211F_LCR, led_data);
+		phy_write(phydev, RTL8211F_EEELCR, 0x0);
+		phy_write(phydev, RTL821x_PAGE_SELECT, 0x0);
+	}
+
 	if (priv->has_phycr2) {
 		ret = phy_modify_paged(phydev, 0xa43, RTL8211F_PHYCR2,
 				       RTL8211F_CLKOUT_EN, priv->phycr2);
@@ -423,9 +436,11 @@ static int rtl8211f_config_init(struct phy_device *phydev)
 				ERR_PTR(ret));
 			return ret;
 		}
+
+		return genphy_soft_reset(phydev);
 	}
 
-	return genphy_soft_reset(phydev);
+	return 0;
 }
 
 static int rtl821x_resume(struct phy_device *phydev)
@@ -781,7 +796,7 @@ static int rtl8221b_vb_cg_match_phy_device(struct phy_device *phydev)
 		id |= val;
 	}
 
-	return (id == 0x001cc849);
+	return (id == RTL_8221B_VB_CG_PHYID);
 }
 
 static int rtl822x_probe(struct phy_device *phydev)

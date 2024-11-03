@@ -294,9 +294,10 @@ static void rockchip_pcie_set_power_limit(struct rockchip_pcie *rockchip)
 static int rockchip_pcie_host_init_port(struct rockchip_pcie *rockchip)
 {
 	struct device *dev = rockchip->dev;
-	int err, i = MAX_LANE_NUM, attempt_counter = 0;
+	int err, i = MAX_LANE_NUM;
 	u32 status;
-	err_retry_init:
+
+	/* Assert PERST */
 	gpiod_set_value_cansleep(rockchip->ep_gpio, 0);
 
 	err = rockchip_pcie_init_port(rockchip);
@@ -325,14 +326,25 @@ static int rockchip_pcie_host_init_port(struct rockchip_pcie *rockchip)
 	rockchip_pcie_write(rockchip, PCIE_CLIENT_LINK_TRAIN_ENABLE,
 			    PCIE_CLIENT_CONFIG);
 
+	/*
+	 * PCIe CME specifications mandate that PERST be asserted for at
+	 * least 100ms after power is stable.
+	 */
+	msleep(100);
 	gpiod_set_value_cansleep(rockchip->ep_gpio, 1);
+
+	/*
+	 * PCIe base specifications rev 2.0 mandate that the host wait for
+	 * 100ms after completion of a conventional reset.
+	 */
+	msleep(100);
 
 	/* 500ms timeout value should be enough for Gen1/2 training */
 	err = readl_poll_timeout(rockchip->apb_base + PCIE_CLIENT_BASIC_STATUS1,
 				 status, PCIE_LINK_UP(status), 20,
 				 500 * USEC_PER_MSEC);
 	if (err) {
-		dev_err(dev, "PCIe link training gen1 timeout with x%d!\n", status);
+		dev_err(dev, "PCIe link training gen1 timeout!\n");
 		goto err_power_off_phy;
 	}
 
@@ -349,7 +361,7 @@ static int rockchip_pcie_host_init_port(struct rockchip_pcie *rockchip)
 					 status, PCIE_LINK_IS_GEN2(status), 20,
 					 500 * USEC_PER_MSEC);
 		if (err)
-			dev_dbg(dev, "PCIe link training gen2 timeout with x%d, fall back to gen1!\n", status);
+			dev_dbg(dev, "PCIe link training gen2 timeout, fall back to gen1!\n");
 	}
 
 	/* Check the final link width from negotiated lane counter from MGMT */
@@ -397,8 +409,6 @@ err_power_off_phy:
 	i = MAX_LANE_NUM;
 	while (i--)
 		phy_exit(rockchip->phys[i]);
-	if(attempt_counter++ < 5)
-	goto err_retry_init;
 	return err;
 }
 

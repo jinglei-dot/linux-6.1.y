@@ -10,6 +10,7 @@
 #include <linux/bitfield.h>
 #include <linux/hwmon.h>
 #include <linux/mutex.h>
+#include <linux/of.h>
 #include <linux/phy.h>
 #include <linux/polynomial.h>
 #include <linux/netdevice.h>
@@ -33,6 +34,7 @@
 #define PHY_MIISTAT		0x18	/* MII state */
 #define PHY_IMASK		0x19	/* interrupt mask */
 #define PHY_ISTAT		0x1A	/* interrupt status */
+#define PHY_LED			0x1B	/* LED control */
 #define PHY_FWV			0x1E	/* firmware version */
 
 #define PHY_MIISTAT_SPD_MASK	GENMASK(2, 0)
@@ -56,9 +58,14 @@
 				 PHY_IMASK_ADSC | \
 				 PHY_IMASK_ANC)
 
+#define PHY_LED_NUM_LEDS	4
+
 #define PHY_FWV_REL_MASK	BIT(15)
 #define PHY_FWV_MAJOR_MASK	GENMASK(11, 8)
 #define PHY_FWV_MINOR_MASK	GENMASK(7, 0)
+
+/* LED */
+#define VSPEC1_LED(x)		(0x1 + x)
 
 /* SGMII */
 #define VSPEC1_SGMII_CTRL	0x08
@@ -95,6 +102,14 @@ struct gpy_priv {
 
 	u8 fw_major;
 	u8 fw_minor;
+	u32 wolopts;
+
+	/* It takes 3 seconds to fully switch out of loopback mode before
+	 * it can safely re-enter loopback mode. Record the time when
+	 * loopback is disabled. Check and wait if necessary before loopback
+	 * is enabled.
+	 */
+	u64 lb_dis_to;
 };
 
 static const struct {
@@ -202,6 +217,15 @@ static int gpy_hwmon_register(struct phy_device *phydev)
 }
 #endif
 
+static int gpy_ack_interrupt(struct phy_device *phydev)
+{
+	int ret;
+
+	/* Clear all pending interrupts */
+	ret = phy_read(phydev, PHY_ISTAT);
+	return ret < 0 ? ret : 0;
+}
+
 static int gpy_mbox_read(struct phy_device *phydev, u32 addr)
 {
 	struct gpy_priv *priv = phydev->priv;
@@ -241,18 +265,39 @@ out:
 	return ret;
 }
 
+static int gpy_led_write(struct phy_device *phydev)
+{
+	struct device_node *node = phydev->mdio.dev.of_node;
+	u32 led_regs[PHY_LED_NUM_LEDS];
+	int i, ret;
+	u16 val = 0xff00;
+
+	if (!IS_ENABLED(CONFIG_OF_MDIO))
+		return 0;
+
+	if (of_property_read_u32_array(node, "mxl,led-config", led_regs, PHY_LED_NUM_LEDS))
+		return 0;
+
+	if (of_property_read_bool(node, "mxl,led-drive-vdd"))
+		val &= 0x0fff;
+
+	/* Enable LED function handling on all ports*/
+	phy_write(phydev, PHY_LED, val);
+
+	/* Write LED register values */
+	for (i = 0; i < PHY_LED_NUM_LEDS; i++) {
+		ret = phy_write_mmd(phydev, MDIO_MMD_VEND1, VSPEC1_LED(i), (u16)led_regs[i]);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+
 static int gpy_config_init(struct phy_device *phydev)
 {
-	int ret;
-
-	/* Mask all interrupts */
-	ret = phy_write(phydev, PHY_IMASK, 0);
-	if (ret)
-		return ret;
-
-	/* Clear all pending interrupts */
-	ret = phy_read(phydev, PHY_ISTAT);
-	return ret < 0 ? ret : 0;
+	/* Nothing to configure. Configuration Requirement Placeholder */
+	return gpy_led_write(phydev);
 }
 
 static bool gpy_has_broken_mdint(struct phy_device *phydev)
@@ -533,10 +578,22 @@ static int gpy_read_status(struct phy_device *phydev)
 
 static int gpy_config_intr(struct phy_device *phydev)
 {
+	struct gpy_priv *priv = phydev->priv;
 	u16 mask = 0;
+	int ret;
+
+	ret = gpy_ack_interrupt(phydev);
+	if (ret)
+		return ret;
 
 	if (phydev->interrupts == PHY_INTERRUPT_ENABLED)
 		mask = PHY_IMASK_MASK;
+
+	if (priv->wolopts & WAKE_MAGIC)
+		mask |= PHY_IMASK_WOL;
+
+	if (priv->wolopts & WAKE_PHY)
+		mask |= PHY_IMASK_LSTC;
 
 	return phy_write(phydev, PHY_IMASK, mask);
 }
@@ -586,6 +643,7 @@ static int gpy_set_wol(struct phy_device *phydev,
 		       struct ethtool_wolinfo *wol)
 {
 	struct net_device *attach_dev = phydev->attached_dev;
+	struct gpy_priv *priv = phydev->priv;
 	int ret;
 
 	if (wol->wolopts & WAKE_MAGIC) {
@@ -633,6 +691,8 @@ static int gpy_set_wol(struct phy_device *phydev,
 		ret = phy_read(phydev, PHY_ISTAT);
 		if (ret < 0)
 			return ret;
+
+		priv->wolopts |= WAKE_MAGIC;
 	} else {
 		/* Disable magic packet matching */
 		ret = phy_clear_bits_mmd(phydev, MDIO_MMD_VEND2,
@@ -640,6 +700,13 @@ static int gpy_set_wol(struct phy_device *phydev,
 					 WOL_EN);
 		if (ret < 0)
 			return ret;
+
+		/* Disable the WOL interrupt */
+		ret = phy_clear_bits(phydev, PHY_IMASK, PHY_IMASK_WOL);
+		if (ret < 0)
+			return ret;
+
+		priv->wolopts &= ~WAKE_MAGIC;
 	}
 
 	if (wol->wolopts & WAKE_PHY) {
@@ -656,9 +723,11 @@ static int gpy_set_wol(struct phy_device *phydev,
 		if (ret & (PHY_IMASK_MASK & ~PHY_IMASK_LSTC))
 			phy_trigger_machine(phydev);
 
+		priv->wolopts |= WAKE_PHY;
 		return 0;
 	}
 
+	priv->wolopts &= ~WAKE_PHY;
 	/* Disable the link state change interrupt */
 	return phy_clear_bits(phydev, PHY_IMASK, PHY_IMASK_LSTC);
 }
@@ -666,34 +735,42 @@ static int gpy_set_wol(struct phy_device *phydev,
 static void gpy_get_wol(struct phy_device *phydev,
 			struct ethtool_wolinfo *wol)
 {
-	int ret;
+	struct gpy_priv *priv = phydev->priv;
 
 	wol->supported = WAKE_MAGIC | WAKE_PHY;
-	wol->wolopts = 0;
-
-	ret = phy_read_mmd(phydev, MDIO_MMD_VEND2, VPSPEC2_WOL_CTL);
-	if (ret & WOL_EN)
-		wol->wolopts |= WAKE_MAGIC;
-
-	ret = phy_read(phydev, PHY_IMASK);
-	if (ret & PHY_IMASK_LSTC)
-		wol->wolopts |= WAKE_PHY;
+	wol->wolopts = priv->wolopts;
 }
 
 static int gpy_loopback(struct phy_device *phydev, bool enable)
 {
+	struct gpy_priv *priv = phydev->priv;
+	u16 set = 0;
 	int ret;
 
-	ret = phy_modify(phydev, MII_BMCR, BMCR_LOOPBACK,
-			 enable ? BMCR_LOOPBACK : 0);
-	if (!ret) {
-		/* It takes some time for PHY device to switch
-		 * into/out-of loopback mode.
-		 */
-		msleep(100);
+	if (enable) {
+		u64 now = get_jiffies_64();
+
+		/* wait until 3 seconds from last disable */
+		if (time_before64(now, priv->lb_dis_to))
+			msleep(jiffies64_to_msecs(priv->lb_dis_to - now));
+
+		set = BMCR_LOOPBACK;
 	}
 
-	return ret;
+	ret = phy_modify(phydev, MII_BMCR, BMCR_LOOPBACK, set);
+	if (ret <= 0)
+		return ret;
+
+	if (enable) {
+		/* It takes some time for PHY device to switch into
+		 * loopback mode.
+		 */
+		msleep(100);
+	} else {
+		priv->lb_dis_to = get_jiffies_64() + HZ * 3;
+	}
+
+	return 0;
 }
 
 static int gpy115_loopback(struct phy_device *phydev, bool enable)

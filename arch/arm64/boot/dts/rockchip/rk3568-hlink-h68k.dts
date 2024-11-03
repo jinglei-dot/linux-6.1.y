@@ -236,8 +236,8 @@
 	assigned-clocks = <&cru SCLK_GMAC0_RX_TX>, <&cru SCLK_GMAC0>;
 	assigned-clock-parents = <&cru SCLK_GMAC0_RGMII_SPEED>;
 	assigned-clock-rates = <0>, <125000000>;
-	clock_in_out = "input";
-	phy-mode = "rgmii-id";
+	clock_in_out = "output";
+	phy-mode = "rgmii";
 	pinctrl-names = "default";
 	pinctrl-0 = <&gmac0_miim
 		     &gmac0_tx_bus2
@@ -247,8 +247,8 @@
 	snps,reset-gpio = <&gpio2 RK_PD3 GPIO_ACTIVE_LOW>;
 	snps,reset-active-low;
 	snps,reset-delays-us = <0 50000 200000>;
-	tx_delay = <0x3c>;
-	rx_delay = <0x2f>;
+	tx_delay = <0x2e>;
+	rx_delay = <0x28>;
 	phy-handle = <&rgmii_phy0>;
 	status = "okay";
 };
@@ -257,7 +257,7 @@
 	assigned-clocks = <&cru SCLK_GMAC1_RX_TX>, <&cru SCLK_GMAC1>;
 	assigned-clock-parents = <&cru SCLK_GMAC1_RGMII_SPEED>;
 	assigned-clock-rates = <0>, <125000000>;
-	clock_in_out = "input";
+	clock_in_out = "output";
 	phy-mode = "rgmii";
 	pinctrl-names = "default";
 	pinctrl-0 = <&gmac1m1_miim
@@ -647,7 +647,14 @@
 		rtl8125_1: pcie-eth@10,0 {
 			compatible = "pci10ec,8125";
 			reg = <0x000000 0 0 0 0>;
-			realtek,led-data = <0x0200>;
+
+			/* G+ 3v3
+			 * G- LED3: LINK on 100 + 1000 + 2500
+			 * Y+ 3v3
+			 * Y- LED2: ACT on all speed
+			 */
+			r8125,led2 = <0x0200>;
+			r8125,led3 = <0x002a>;
 		};
 	};
 };
@@ -667,7 +674,14 @@
 		rtl8125_2: pcie-eth@20,0 {
 			compatible = "pci10ec,8125";
 			reg = <0x000000 0 0 0 0>;
-			realtek,led-data = <0x0200>;
+
+			/* G+ 3v3
+			 * G- LED3: LINK on 100 + 1000 + 2500
+			 * Y+ 3v3
+			 * Y- LED2: ACT on all speed
+			 */
+			r8125,led2 = <0x0200>;
+			r8125,led3 = <0x002a>;
 		};
 	};
 };

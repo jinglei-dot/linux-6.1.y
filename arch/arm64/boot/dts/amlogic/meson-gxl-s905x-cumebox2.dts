@@ -103,16 +103,16 @@
 			label = "led_blue";
 			color = <LED_COLOR_ID_BLUE>;
 			gpios = <&gpio GPIODV_24 GPIO_ACTIVE_HIGH>; // 73  gpio 474
-      default-state = "off";
-      linux,default-trigger = "default-on";
+            default-state = "off";
+            linux,default-trigger = "default-on";
 		};
 
 		led_red {
 			label = "led_red";
 			color = <LED_COLOR_ID_RED>;
-      function = LED_FUNCTION_POWER;
+            function = LED_FUNCTION_POWER;
 			gpios = <&gpio GPIODV_26 GPIO_ACTIVE_HIGH>; // 75 gpio 476
-      default-state = "off";
+            default-state = "off";
 			panic-indicator;
 		};
 
@@ -121,12 +121,12 @@
 			color = <LED_COLOR_ID_GREEN>;
 			gpios = <&gpio GPIODV_27 GPIO_ACTIVE_HIGH>; // 76  gpio 477
 			default-state = "on";
-      //linux,default-trigger = "disk-activity";
+            //linux,default-trigger = "disk-activity";
 		};
 
 		led_link {
 			label = "led_link";
-      color = <LED_COLOR_ID_GREEN>;
+            color = <LED_COLOR_ID_GREEN>;
 			gpios = <&gpio GPIOZ_14 GPIO_ACTIVE_HIGH>;
 			default-state = "off";
 			linux,default-trigger = "mdio_mux-0.e40908ff:08:link";

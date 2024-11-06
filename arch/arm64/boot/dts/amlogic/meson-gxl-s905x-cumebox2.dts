@@ -149,7 +149,7 @@
 
 			trips {
 				cpu_active: cpu-active {
-					temperature = <65000>; /* millicelsius */
+					temperature = <50000>; /* millicelsius */
 					hysteresis = <3000>; /* millicelsius */
 					type = "active";
 				};

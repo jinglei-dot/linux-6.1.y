@@ -96,27 +96,6 @@
 		};
 	};
 
-	smbios {
-		compatible = "u-boot,sysinfo-smbios";
-
-		smbios {
-			system {
-				manufacturer = "CumeBox2";
-				product = "CM2-B";
-			};
-
-			baseboard {
-				manufacturer = "CumeBox2";
-				product = "CM2-B";
-			};
-
-			chassis {
-				manufacturer = "CumeBox2";
-				product = "CM2-B";
-			};
-		};
-	};
-
   leds {
 		compatible = "gpio-leds";
 
@@ -142,7 +121,7 @@
 			color = <LED_COLOR_ID_GREEN>;
       function = LED_FUNCTION_HEARTBEAT;
 			gpios = <&gpio GPIODV_27 GPIO_ACTIVE_HIGH>; // 76  gpio 477
-			default-state = "off";
+			default-state = "on";
       //linux,default-trigger = "disk-activity";
 		};
 
@@ -159,6 +138,7 @@
       color = <LED_COLOR_ID_YELLOW>;
 			gpios = <&gpio GPIOZ_15 GPIO_ACTIVE_HIGH>;
 			default-state = "off";
+      linux,default-trigger = "netdev";
 		};
 	};
 

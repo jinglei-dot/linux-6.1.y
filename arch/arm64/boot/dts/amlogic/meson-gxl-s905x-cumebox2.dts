@@ -120,7 +120,7 @@
 			label = "led_green";
 			color = <LED_COLOR_ID_GREEN>;
 			gpios = <&gpio GPIODV_27 GPIO_ACTIVE_HIGH>; // 76  gpio 477
-			default-state = "on";
+			default-state = "off";
 		};
 
 		led_link {

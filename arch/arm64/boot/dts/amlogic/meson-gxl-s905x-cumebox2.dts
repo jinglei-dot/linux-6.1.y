@@ -121,12 +121,11 @@
 			color = <LED_COLOR_ID_GREEN>;
 			gpios = <&gpio GPIODV_27 GPIO_ACTIVE_HIGH>; // 76  gpio 477
 			default-state = "on";
-            //linux,default-trigger = "disk-activity";
 		};
 
 		led_link {
 			label = "led_link";
-            color = <LED_COLOR_ID_GREEN>;
+            color = <LED_COLOR_ID_YELLOW>;
 			gpios = <&gpio GPIOZ_14 GPIO_ACTIVE_HIGH>;
 			default-state = "off";
 			linux,default-trigger = "mdio_mux-0.e40908ff:08:link";
@@ -134,10 +133,10 @@
 
 		led_act {
 			label = "led_act";
-      color = <LED_COLOR_ID_YELLOW>;
+            color = <LED_COLOR_ID_YELLOW>;
 			gpios = <&gpio GPIOZ_15 GPIO_ACTIVE_HIGH>;
 			default-state = "off";
-      linux,default-trigger = "netdev";
+            linux,default-trigger = "netdev";
 		};
 	};
 

@@ -110,7 +110,7 @@
 		led_red {
 			label = "led_red";
 			color = <LED_COLOR_ID_RED>;
-      function = LED_FUNCTION_STATUS;
+      function = LED_FUNCTION_POWER;
 			gpios = <&gpio GPIODV_26 GPIO_ACTIVE_HIGH>; // 75 gpio 476
       default-state = "off";
 			panic-indicator;
@@ -119,7 +119,7 @@
 		led_green {
 			label = "led_green";
 			color = <LED_COLOR_ID_GREEN>;
-      function = LED_FUNCTION_HEARTBEAT;
+      //function = LED_FUNCTION_HEARTBEAT;
 			gpios = <&gpio GPIODV_27 GPIO_ACTIVE_HIGH>; // 76  gpio 477
 			default-state = "on";
       //linux,default-trigger = "disk-activity";

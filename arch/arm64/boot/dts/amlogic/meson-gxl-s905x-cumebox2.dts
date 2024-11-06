@@ -143,7 +143,7 @@
       function = LED_FUNCTION_HEARTBEAT;
 			gpios = <&gpio GPIODV_27 GPIO_ACTIVE_HIGH>; // 76  gpio 477
 			default-state = "off";
-      linux,default-trigger = "disk-activity";
+      //linux,default-trigger = "disk-activity";
 		};
 
 		led_link {
